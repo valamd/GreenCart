@@ -40,32 +40,33 @@ const ShoppingCart = () => {
   useEffect(() => {
     fetchData();
     fetchSavedAddresses();
-    // Fetch user info for Razorpay
-    const fetchUserInfo = async () => {
-      try {
-        const token = localStorage.getItem("authToken");
-        // Assuming you have an API to fetch user profile info
-        // Replace with your actual API call
-        const response = await fetch("http://localhost:5000/api/users/getuserdetails", {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-        const userData = await response.json();
-        if (userData.success) {
-          setCustomerInfo({
-            name: userData.user.name || "",
-            email: userData.user.email || "",
-            phone: userData.user.phone || ""
-          });
-        }
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-      }
-    };
-    fetchUserInfo();
+  
+    // fetchUserInfo();
   }, []);
+  useEffect(() => {  
+    fetchUserInfo();
+  }, [customerInfo]);
+  const fetchUserInfo = async () => {
+    try {
+      const token = localStorage.getItem("authToken");
 
+      const response = await fetch("http://localhost:5000/api/users/getuserdetails", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const userData = await response.json();
+        let name = "";
+        let email = "";
+        let phone = "";
+        name = userData.userTypeData?.CustomerName || "";
+        email = userData.userTypeData?.CustomerEmail || "";
+        phone = userData.userTypeData?.CustomerContact || "";
+        setCustomerInfo({ name, email, phone });
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+    }
+  };
   const fetchData = async () => {
     try {
       const token = localStorage.getItem("authToken");

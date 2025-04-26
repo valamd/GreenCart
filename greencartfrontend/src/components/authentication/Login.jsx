@@ -127,7 +127,7 @@ const Login = ({ onSwitchToRegister, showNotification }) => {
           </button>
         </p>
       </CardFooter>
-      <SocialLogin />
+      {/* <SocialLogin /> */}
     </Card>
   );
 };

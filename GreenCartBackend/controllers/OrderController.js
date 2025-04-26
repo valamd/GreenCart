@@ -131,6 +131,7 @@ exports.getOrder = async (req, res) =>
 
   res.json({
     success: true,
+    order,
     orderStatus: {
       currentStep: order.orderStatus, // e.g., "shipped"
       expectedDelivery: new Date(order.orderDate).setDate(new Date(order.orderDate).getDate() + 3),

@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
+import { jsPDF } from "jspdf";
+// Import jspdf-autotable correctly
+import autoTable from "jspdf-autotable";
 
 const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [paymentId, setPaymentId] = useState("");
   const [paymentDetails, setPaymentDetails] = useState(null);
+  const [receiptGenerated, setReceiptGenerated] = useState(false);
 
   // Load Razorpay script
   useEffect(() => {
@@ -99,6 +103,28 @@ const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
       if (verifyResponse.data.success) {
         setPaymentId(response.razorpay_payment_id);
         toast.success("Payment successful!");
+        
+        // Fetch payment details and auto-generate receipt
+        const paymentId = response.razorpay_payment_id;
+        try {
+          const detailsResponse = await axios.get(`http://localhost:5000/api/payment/${paymentId}`);
+          const address = await axios.get(`http://localhost:5000/api/addresses/${customerInfo.deliveryAddress}`)
+          customerInfo.deliveryAddress = address;
+          if (detailsResponse.data.success) {
+            const paymentDetails = detailsResponse.data;
+            console.log("paymentdetail", paymentDetails);
+            setPaymentDetails(paymentDetails);
+            // Auto generate and download receipt with a short delay to ensure UI updates first
+            setTimeout(() => {
+              generateReceipt(paymentDetails, paymentId);
+              setReceiptGenerated(true);
+            }, 500);
+          }
+        } catch (error) {
+          console.error("Error fetching payment details:", error);
+          toast.error("Receipt generation failed");
+        }
+        
         if (onSuccess) onSuccess(response);
       } else {
         toast.error("Payment verification failed");
@@ -111,20 +137,58 @@ const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
     }
   };
 
-  // Fetch payment details
-  const fetchPaymentDetails = async () => {
-    if (!paymentId) {
+  // Fetch payment details with related order and customer information
+  const fetchPaymentDetails = async (id = null) => {
+    const payId = id || paymentId;
+      
+    if (!payId) {
       toast.error("Please enter a payment ID");
       return;
     }
-
+    
     setIsLoading(true);
     try {
-      const response = await axios.get(`http://localhost:5000/api/payment/${paymentId}`);
-      
+      // Fetch payment details
+      const response = await axios.get(`http://localhost:5000/api/payment/${payId}`);
+       console.log("response", response);   
       if (response.data.success) {
-        setPaymentDetails(response.data);
+        let paymentData = response.data;
+        console.log("paymentData",paymentData);
+        // If the payment has an orderId, fetch the order details
+        if (paymentData.orderId) {
+          try {
+            const orderResponse = await axios.get(`http://localhost:5000/api/orders/${paymentData.orderId}`);
+            console.log("orderresponse", orderResponse);
+            if (orderResponse.data.success) {
+              paymentData.orderDetails = orderResponse.data.order;
+              console.log("orderdetail",paymentData.orderDetail);
+              // If order has a user ID, fetch customer details
+              if (orderResponse.data.order.user) {
+                try {
+                  const customerResponse = await axios.get(`http://localhost:5000/api/customers/user/${orderResponse.data.order.user}`);
+                  
+                  if (customerResponse.data.success) {
+                    paymentData.customerDetails = customerResponse.data.customer;
+                  }
+                } catch (customerError) {
+                  console.error("Error fetching customer:", customerError);
+                }
+              }
+            }
+          } catch (orderError) {
+            console.error("Error fetching order:", orderError);
+          }
+        }
+        
+        // Store the complete payment data with related information
+        setPaymentDetails(paymentData);
+        setReceiptGenerated(true);
         toast.success("Payment details fetched successfully");
+        
+        // Auto-generate receipt if this is first successful fetch
+        if (!receiptGenerated) {
+          generateReceipt(paymentData, payId);
+        }
       } else {
         toast.error("Failed to fetch payment details");
       }
@@ -133,6 +197,223 @@ const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
       toast.error("Failed to fetch payment details");
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  // Generate enhanced PDF receipt with complete customer and order details
+  const generateReceipt = (details = null, id = null) => {
+    const payDetails = details || paymentDetails;
+    const payId = id || paymentId;
+      
+    if (!payDetails) {
+      toast.error("No payment details available");
+      return;
+    }
+    
+    try {
+      // Create new PDF document
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+          
+      // Add logo and header
+      doc.setFontSize(20);
+      doc.setTextColor(0, 128, 0);
+      doc.text("Green Cart", pageWidth / 2, 20, { align: "center" });
+          
+      // Add receipt title
+      doc.setFontSize(16);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Payment Receipt", pageWidth / 2, 30, { align: "center" });
+          
+      // Add date and receipt number
+      doc.setFontSize(10);
+      const today = new Date().toLocaleDateString();
+      doc.text(`Date: ${today}`, 20, 40);
+      doc.text(`Receipt id: ${payDetails.id || payId}`, 20, 45);
+          
+      // Get customer information from the payment data
+      // First try to get from the explicitly fetched customerDetails
+      const customer = payDetails.customerDetails || {};
+      
+      // Add customer information - with better fallbacks to ensure data appears
+      doc.setFontSize(12);
+      doc.text("Customer Information", 20, 55);
+      doc.setFontSize(10);
+      
+      // For customer name, check multiple possible locations with fallbacks
+      const customerName = 
+      customerInfo.name || 
+        customer.Name || 
+        (payDetails.orderDetails?.user?.name) ||
+        (payDetails.metadata?.customerName) ||
+        "N/A";
+      doc.text(`Name: ${customerName}`, 25, 60);
+      
+      // For customer email, check multiple possible locations with fallbacks
+      const customerEmail = 
+      customerInfo.email || 
+        customer.Email || 
+        (payDetails.orderDetails?.user?.email) ||
+        (payDetails.metadata?.customerEmail) ||
+        "N/A";
+      doc.text(`Email: ${customerEmail}`, 25, 65);
+      
+      // For customer phone, check multiple possible locations with fallbacks
+      const customerPhone =
+        customerInfo.phone || 
+        customer.CustomerContact || 
+        customer.Phone ||
+        (payDetails.metadata?.customerPhone) ||
+        "N/A";
+      doc.text(`Phone: ${customerPhone}`, 25, 70);
+      
+      // Add shipping address if available
+// Add delivery address from orderDetailInfo -> deliveryAddress
+let addressText = "N/A";
+if (customerInfo.deliveryAddress) {
+  const address = customerInfo.deliveryAddress;
+  const addressParts = [];
+  
+  // Build address string from the fields in your Address schema
+  if (address.streetOrSociety) addressParts.push(address.streetOrSociety);
+  if (address.cityVillage) addressParts.push(address.cityVillage);
+  if (address.pincode) addressParts.push(`Pincode: ${address.pincode}`);
+  if (address.state) addressParts.push(address.state);
+  if (address.country) addressParts.push(address.country);
+  
+  // Join the address parts with commas
+  if (addressParts.length > 0) {
+    addressText = addressParts.join(', ');
+  }
+} else if (payDetails.metadata?.customerAddress) {
+  // Fallback to metadata if available
+  addressText = payDetails.metadata.customerAddress;
+}
+
+doc.text(`Delivery Address: ${addressText}`, 25, 75);
+      
+      // Payment Summary
+      doc.setFontSize(12);
+      doc.text("Payment Summary", 20, 85);
+      
+      // Format amount with proper decimal places
+      const amount = payDetails.amount ? Number(payDetails.amount).toFixed(2) : '0.00';
+      
+      // Get payment status with fallbacks
+      const paymentStatus = payDetails.status || payDetails.Status || "N/A";
+      
+      // Get payment method with fallbacks
+      const paymentMethod = 
+        payDetails.method || 
+        payDetails.paymentMethod || 
+        payDetails.orderDetails?.paymentMethod || 
+        "N/A";
+      
+      autoTable(doc, {
+        startY: 90,
+        head: [["Description", "Amount", "Status", "Payment Method"]],
+        body: [
+          [
+            "Payment for your order",
+            `₹${amount}`,
+            paymentStatus,
+            paymentMethod
+          ]
+        ],
+        theme: "grid",
+        headStyles: { fillColor: [76, 175, 80] }
+      });
+      
+      let finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 120;
+      
+      // Add order details if available
+      if (payDetails.orderDetails) {
+        const order = payDetails.orderDetails;
+        
+        doc.setFontSize(12);
+        doc.text("Order Details", 20, finalY);
+        finalY += 10;
+        
+        doc.setFontSize(10);
+        doc.text(`Order ID: ${order._id || "N/A"}`, 25, finalY);
+        finalY += 5;
+        doc.text(`Order Date: ${new Date(order.orderDate).toLocaleDateString()}`, 25, finalY);
+        finalY += 5;
+        doc.text(`Order Status: ${order.orderStatus || "N/A"}`, 25, finalY);
+        finalY += 5;
+        doc.text(`Payment Status: ${order.paymentStatus || "N/A"}`, 25, finalY);
+        finalY += 5;
+        doc.text(`Payment Method: ${order.paymentMethod || "N/A"}`, 25, finalY);
+        finalY += 10;
+        
+        // Add ordered items table
+        if (order.orderItems && order.orderItems.length > 0) {
+          const tableItems = order.orderItems.map(item => {
+            const productName = item.product?.Name || "Product";
+            const quantity = item.quantity || 0;
+            const unitPrice = item.price ? Number(item.price).toFixed(2) : '0.00';
+            const subtotal = (item.price && item.quantity) 
+              ? (item.price * item.quantity).toFixed(2) 
+              : '0.00';
+              
+            return [productName, quantity.toString(), `₹${unitPrice}`, `₹${subtotal}`];
+          });
+          
+          autoTable(doc, {
+            startY: finalY,
+            head: [["Product", "Quantity", "Unit Price", "Subtotal"]],
+            body: tableItems,
+            foot: [["", "", "Total", `₹${Number(order.totalPrice).toFixed(2)}`]],
+            theme: "grid",
+            headStyles: { fillColor: [76, 175, 80] },
+            footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' }
+          });
+          
+          finalY = doc.lastAutoTable.finalY + 10;
+        }
+      }
+      
+      // Add order status timeline if available
+      if (payDetails.orderDetails?.timestamps) {
+        const timestamps = payDetails.orderDetails.timestamps;
+        
+        doc.setFontSize(12);
+        doc.text("Order Timeline", 20, finalY);
+        finalY += 10;
+        
+        const timelineData = [];
+        if (timestamps.ordered) timelineData.push(["Order Placed", new Date(timestamps.ordered).toLocaleString()]);
+        if (timestamps.processing) timelineData.push(["Processing", new Date(timestamps.processing).toLocaleString()]);
+        if (timestamps.packed) timelineData.push(["Packed", new Date(timestamps.packed).toLocaleString()]);
+        if (timestamps.shipped) timelineData.push(["Shipped", new Date(timestamps.shipped).toLocaleString()]);
+        if (timestamps.delivered) timelineData.push(["Delivered", new Date(timestamps.delivered).toLocaleString()]);
+        if (timestamps.cancelled) timelineData.push(["Cancelled", new Date(timestamps.cancelled).toLocaleString()]);
+        
+        if (timelineData.length > 0) {
+          autoTable(doc, {
+            startY: finalY,
+            head: [["Status", "Date & Time"]],
+            body: timelineData,
+            theme: "grid",
+            headStyles: { fillColor: [76, 175, 80] }
+          });
+          
+          finalY = doc.lastAutoTable.finalY + 10;
+        }
+      }
+      
+      // Add footer text
+      doc.setFontSize(10);
+      doc.text("Thank you for shopping with Green Cart!", pageWidth / 2, finalY, { align: "center" });
+      doc.text("This is a computer-generated receipt and does not require a signature.", pageWidth / 2, finalY + 10, { align: "center" });
+          
+      // Save PDF
+      const fileName = `receipt_${payDetails.id || payId}.pdf`;
+      doc.save(fileName);
+      toast.success("Receipt downloaded successfully");
+    } catch (error) {
+      console.error("Error generating receipt:", error);
+      toast.error("Failed to generate receipt");
     }
   };
 
@@ -161,7 +442,7 @@ const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
             className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
           />
           <button
-            onClick={fetchPaymentDetails}
+            onClick={() => fetchPaymentDetails()}
             disabled={isLoading || !paymentId}
             className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition duration-300 disabled:opacity-50"
           >
@@ -177,8 +458,19 @@ const RazorpayPayment = ({ amount, onSuccess, onFailure, customerInfo }) => {
               <li><span className="font-medium">Amount:</span> ₹{paymentDetails.amount}</li>
               <li><span className="font-medium">Currency:</span> {paymentDetails.currency}</li>
               <li><span className="font-medium">Status:</span> <span className={`font-medium ${paymentDetails.status === 'captured' ? 'text-green-600' : 'text-orange-500'}`}>{paymentDetails.status}</span></li>
-              <li><span className="font-medium">Method:</span> {paymentDetails.method}</li>
+              <li><span className="font-medium">Method:</span> {paymentDetails.method || "N/A"}</li>
+              <li><span className="font-medium">Payment ID:</span> {paymentDetails.id || paymentId}</li>
             </ul>
+            
+            {/* Receipt Actions - Only manual download if needed again */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => generateReceipt()}
+                className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition duration-300"
+              >
+                Download Receipt Again
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -87,6 +87,19 @@ exports.getCustomer = async (req, res) => {
   }
 };
 
+// ✅ Get a Customer by UserID
+exports.getCustomerByUserID = async (req, res) => {
+  try {
+    const customer = await Customer.findOne({ user: req.params.userId }); // Assuming you pass userId as a route param
+    if (!customer) {
+      return res.status(404).json({ message: 'Customer not found' });
+    }
+    res.status(200).json(customer);
+  } catch (error) {
+    res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+};
+
 // ✅ Update a Customer and Addresses
 exports.updateCustomer = async (req, res) => {
   try {

@@ -409,37 +409,48 @@ exports.getcurrentuser = async (req, res) => {
 exports.getUserDetails = async (req, res) => {
   try {
     const userId = req.user.id;
-    // 🔹 Step 1: Find User
+
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     let userTypeData = null;
     let userType = "unknown";
 
-    // 🔹 Step 2: Check if user is a Customer
     const customer = await Customer.findOne({ user: user._id }).populate("CustomerAddress");
     if (customer) {
       userType = "customer";
-      userTypeData = customer;
+      userTypeData = {
+        CustomerName: customer.CustomerName,
+        CustomerEmail: customer.CustomerEmail,
+        CustomerContact: customer.CustomerContact,
+      };
     } else {
-      // 🔹 Step 3: Check if user is an Admin
       const admin = await Admin.findOne({ user: user._id }).populate("adminAddress");
       if (admin) {
         userType = "admin";
-        userTypeData = admin;
+        userTypeData = {
+          adminName: admin.adminName,
+          adminEmail: admin.adminEmail,
+          adminContact: admin.adminContact,
+        };
       }
     }
 
-    // 🔹 Step 4: Send response
     res.json({
-      user,
+      success: true,
+      user: {
+        id: user._id,
+        email: user.UserEmail,
+        name: user.UserName,
+        type: user.UserType
+      },
       userType,
-      userTypeData,
+      userTypeData
     });
   } catch (error) {
     console.error("Error fetching user details:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
