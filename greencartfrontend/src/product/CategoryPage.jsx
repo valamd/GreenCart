@@ -9,8 +9,9 @@ import { useNavigate } from "react-router-dom";
 import BackButton from "../components/ui/BackButton";
 import ScrollToTop from "../components/ui/ScrollToTop";
 
-const Notification = ({ message, type, isVisible }) => {
-  if (!isVisible) return null;
+const Notification = ({ message, type, show }) => {
+  if (!show) return null;
+  
   
   return (
     <motion.div
@@ -32,12 +33,13 @@ const Notification = ({ message, type, isVisible }) => {
 };
 
 
-const ProductCard = ({ product, addToCart, showNotification }) => {
+const ProductCard = ({ product, addToCart }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isQuickViewOpen, setIsQuickViewOpen] = useState(false);
+  const [notification, setNotification] = useState({ show: false, message: "" });
 
   useEffect(() => {
     const fetchWishlist = async () => {
@@ -59,15 +61,22 @@ const ProductCard = ({ product, addToCart, showNotification }) => {
     fetchWishlist();
   }, [product._id]);
 
+  const showNotification = (message, type = "success") => {
+    setNotification({ show: true, message, type });
+    setTimeout(() => {
+      setNotification({ show: false, message: "" });
+    }, 3000);
+  };
+
   const handleWishlistToggle = async () => {
     const token = localStorage.getItem("authToken");
     if (!token) {
       showNotification("Please login to manage wishlist", "error");
       return;
     }
-
+  
     setWishlistLoading(true);
-
+  
     try {
       if (isWishlisted) {
         await axios.delete(`http://localhost:5000/api/wishlist/remove/${product._id}`, {
@@ -88,9 +97,10 @@ const ProductCard = ({ product, addToCart, showNotification }) => {
       console.error("Error updating wishlist:", error.response?.data || error.message);
       showNotification("Failed to update wishlist", "error");
     }
-
+  
     setWishlistLoading(false);
   };
+  
 
   const handleAddToCart = async () => {
     // Check if product is out of stock
@@ -118,6 +128,12 @@ const ProductCard = ({ product, addToCart, showNotification }) => {
       onMouseLeave={() => setIsHovered(false)}
       className="bg-white rounded-2xl overflow-hidden shadow-md hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2 relative p-4 border border-gray-100"
     >
+
+<Notification 
+  message={notification.message} 
+  type={notification.type} 
+  show={notification.show} 
+/>
        <BackButton/>
        <ScrollToTop/>
       {/* Wishlist Button */}
@@ -325,10 +341,10 @@ const CategoryPage = () => {
     <div className="min-h-screen bg-white">
     {/* Notification Component */}
     <Notification 
-        message={notification.message} 
-        type={notification.type} 
-        isVisible={notification.isVisible} 
-      />
+  message={notification.message} 
+  type={notification.type} 
+  show={notification.show} 
+/>
       {/* Category Header */}
       <div className="bg-gradient-to-r from-emerald-50 to-teal-50 py-10">
         <motion.div

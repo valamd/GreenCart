@@ -239,7 +239,7 @@ const QuickViewModal = ({ product, addToCart, isOpen, onClose }) => {
 
             {/* Description */}
             <p className="text-gray-600 leading-relaxed">
-              {product.description || "Experience the finest quality with this exceptional product, crafted to meet your highest expectations."}
+              {product.Description || "Experience the finest quality with this exceptional product, crafted to meet your highest expectations."}
             </p>
 
             {/* Stock and Quantity */}

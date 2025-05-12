@@ -184,151 +184,97 @@ exports.getUser = async (req, res) => {
 // Updated controller function for user profile
 exports.updateUser = async (req, res) => {
   try {
-    const userId = req.user.id; // User ID from token
+    const userId = req.user.id; // Get user ID from token
     let updates = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Hash password if updated
+    // Hash password only if it's being updated
     if (updates.Password) {
       updates.Password = await bcrypt.hash(updates.Password, 10);
     }
-
-    let imageUrl = null;
-
-    // Upload Image if provided
+    
+    let customerImageUrl = null;
+    
+    // Handle Cloudinary upload for Image
     if (req.body.Image) {
       const uploadedResponse = await cloudinary.uploader.upload(req.body.Image, {
-        folder: "profile_images",
+        folder: "customer_images",
       });
-      imageUrl = uploadedResponse.secure_url;
+      customerImageUrl = uploadedResponse.secure_url;
     }
-
-    // Update User basic info
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      {
-        UserName: updates.UserName,
-        UserEmail: updates.UserEmail,
-        // ...(updates.Password && { Password: updates.Password }),
-      },
-      { new: true }
-    ).select("-Password");
-
+    
+    // Update User Model
+    const updatedUser = await User.findByIdAndUpdate(userId, {
+      UserName: updates.UserName,
+      UserEmail: updates.UserEmail,
+      // ...(updates.Password && { Password: updates.Password }), // Update only if provided
+    }, { new: true }).select("-Password");
+    console.log("Updated User:", updatedUser);
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    let updatedProfile = null;
-
-    if (user.UserType === "Customer") {
-      // ---- Handle Customer update ----
-      let addressId = null;
-
-      if (updates.CustomerAddress) {
-        const addressData = {
-          streetOrSociety: updates.CustomerAddress.streetOrSociety,
-          cityVillage: updates.CustomerAddress.cityVillage,
-          pincode: updates.CustomerAddress.pincode,
-          state: updates.CustomerAddress.state,
-          country: updates.CustomerAddress.country,
-          ownerModel: "Customer",
-        };
-
-        const customer = await Customer.findOne({ user: userId }).populate("CustomerAddress");
-
-        if (customer && customer.CustomerAddress?.length > 0) {
-          addressId = customer.CustomerAddress[0]._id;
-          await Address.findByIdAndUpdate(addressId, addressData);
-        } else {
-          const newAddress = new Address(addressData);
-          const savedAddress = await newAddress.save();
-          addressId = savedAddress._id;
-        }
-      }
-
-      const customerUpdateData = {
-        CustomerName: updates.UserName,
-        CustomerEmail: updates.UserEmail,
-        ...(updates.CustomerContact && { CustomerContact: updates.CustomerContact }),
-        ...(imageUrl && { Image: imageUrl }),
+    
+    // Handle address for customer
+    let addressId = null;
+    if (updates.CustomerAddress) {
+      // Create or update address
+      const addressData = {
+        streetOrSociety: updates.CustomerAddress.streetOrSociety,
+        cityVillage: updates.CustomerAddress.cityVillage,
+        pincode: updates.CustomerAddress.pincode,
+        state: updates.CustomerAddress.state,
+        country: updates.CustomerAddress.country,
+        ownerModel: 'Customer'
       };
-
-      if (addressId) {
-        customerUpdateData.CustomerAddress = [addressId];
+      
+      // Find if customer already has an address
+      const customer = await Customer.findOne({ user: userId }).populate('CustomerAddress');
+      
+      if (customer && customer.CustomerAddress && customer.CustomerAddress.length > 0) {
+        // Update existing address
+        addressId = customer.CustomerAddress[0]._id;
+        await Address.findByIdAndUpdate(addressId, addressData);
+      } else {
+        // Create new address
+        const newAddress = new Address(addressData);
+        const savedAddress = await newAddress.save();
+        addressId = savedAddress._id;
       }
-
-      updatedProfile = await Customer.findOneAndUpdate(
-        { user: userId },
-        customerUpdateData,
-        { new: true }
-      );
-    } 
-    else if (user.UserType === "Admin") {
-      // ---- Handle Admin update ----
-      let addressId = null;
-      if (updates.adminAddress) {
-        const addressData = {
-          streetOrSociety: updates.adminAddress.streetOrSociety,
-          cityVillage: updates.adminAddress.cityVillage,
-          pincode: updates.adminAddress.pincode,
-          state: updates.adminAddress.state,
-          country: updates.adminAddress.country,
-          ownerModel: "Admin",
-        };
-console.log(addressData);
-        const admin = await Admin.findOne({ user: userId }).populate("adminAddress");
-
-        if (admin && admin.adminAddress) {
-          addressId = admin.adminAddress._id;
-          await Address.findByIdAndUpdate(addressId, addressData);
-        } else {
-          const newAddress = new Address(addressData);
-          const savedAddress = await newAddress.save();
-          addressId = savedAddress._id;
-        }
-      }
-
-      const adminUpdateData = {
-        adminName: updates.UserName,
-        adminEmail: updates.UserEmail,
-        ...(updates.AdminContact && { adminContact: updates.AdminContact }),
-        ...(imageUrl && { Image: imageUrl }),
-      };
-
-      if (addressId) {
-        adminUpdateData.adminAddress = addressId;
-      }
-
-      updatedProfile = await Admin.findOneAndUpdate(
-        { user: userId },
-        adminUpdateData,
-        { new: true }
-      );
-    } 
-    else {
-      return res.status(400).json({ message: "Invalid user type" });
     }
-
-    if (!updatedProfile) {
-      return res.status(404).json({ message: "Profile not found" });
+    
+    // Prepare customer update data
+    const customerUpdateData = {
+      CustomerName: updates.UserName,
+      CustomerEmail: updates.UserEmail,
+      ...(updates.CustomerContact && { CustomerContact: updates.CustomerContact }),
+      ...(customerImageUrl && { Image: customerImageUrl }),
+    };
+    
+    // Add address reference if we have one
+    if (addressId) {
+      customerUpdateData.CustomerAddress = [addressId];
     }
-
+    
+    // Update Customer Model
+    const updatedCustomer = await Customer.findOneAndUpdate(
+      { user: userId }, // Find customer linked to this user
+      customerUpdateData,
+      { new: true }
+    );
+    
+    if (!updatedCustomer) {
+      return res.status(404).json({ message: "Customer record not found" });
+    }
+    
     res.status(200).json({
       message: "Profile updated successfully",
       user: updatedUser,
-      profile: updatedProfile,
+      customer: updatedCustomer,
     });
-
   } catch (error) {
     console.error("Error updating profile:", error);
     res.status(500).json({ error: error.message });
   }
 };
-
 // Delete a User
 exports.deleteUser = async (req, res) => {
   try {
@@ -409,48 +355,37 @@ exports.getcurrentuser = async (req, res) => {
 exports.getUserDetails = async (req, res) => {
   try {
     const userId = req.user.id;
-
+    // 🔹 Step 1: Find User
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     let userTypeData = null;
     let userType = "unknown";
 
+    // 🔹 Step 2: Check if user is a Customer
     const customer = await Customer.findOne({ user: user._id }).populate("CustomerAddress");
     if (customer) {
       userType = "customer";
-      userTypeData = {
-        CustomerName: customer.CustomerName,
-        CustomerEmail: customer.CustomerEmail,
-        CustomerContact: customer.CustomerContact,
-      };
+      userTypeData = customer;
     } else {
+      // 🔹 Step 3: Check if user is an Admin
       const admin = await Admin.findOne({ user: user._id }).populate("adminAddress");
       if (admin) {
         userType = "admin";
-        userTypeData = {
-          adminName: admin.adminName,
-          adminEmail: admin.adminEmail,
-          adminContact: admin.adminContact,
-        };
+        userTypeData = admin;
       }
     }
 
+    // 🔹 Step 4: Send response
     res.json({
-      success: true,
-      user: {
-        id: user._id,
-        email: user.UserEmail,
-        name: user.UserName,
-        type: user.UserType
-      },
+      user,
       userType,
-      userTypeData
+      userTypeData,
     });
   } catch (error) {
     console.error("Error fetching user details:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
